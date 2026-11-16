@@ -1,0 +1,12 @@
+{
+  "meta": {
+    "title": "DSH Connect Comate",
+    "description": "把本机已登录的文心快码（Comate / Zulu）接入 DSH：复用 CLI 登录态，经受监管的本地 zulu serve 转接对话，并只读展示每日积分与可用模型。"
+  },
+  "tool": {
+    "comate_usage": {
+      "name": "查询 Comate 积分",
+      "description": "读取本机 Comate 账号今日的积分消耗与剩余额度，只读，不改动 Comate。"
+    }
+  }
+}

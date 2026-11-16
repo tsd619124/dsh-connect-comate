@@ -1,0 +1,6 @@
+# Register the Comate (Zulu) provider without touching the profile's default
+# model. The plugin reuses the sign-in the Comate CLI already wrote under
+# ~/.comate; it starts no login flow of its own and writes nothing there.
+- insert:
+    - id: dsh-connect-comate
+      name: dsh-connect-comate

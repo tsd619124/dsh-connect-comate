@@ -1,0 +1,12 @@
+{
+  "meta": {
+    "title": "DSH Connect Comate",
+    "description": "Connects the locally signed-in Comate (Zulu) assistant to DSH by relaying turns through a supervised local zulu serve process, with a read-only view of the daily credit allowance and the available models."
+  },
+  "tool": {
+    "comate_usage": {
+      "name": "Check Comate credits",
+      "description": "Read today's Comate credit spend and remaining allowance. Read-only: nothing on the Comate side is modified."
+    }
+  }
+}
