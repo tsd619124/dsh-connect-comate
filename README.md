@@ -277,14 +277,40 @@ let platform = process.env.PLATFORM || PLATFORM.INTERNAL   // 默认内网
 https://github.com/awesome-dsh-plugin/awesome-dsh-plugin
 ```
 
-上架动作就是在那个仓库里开一个 PR，往列表里加一条（包名、仓库地址、一句话描述、图标）。合并后站点和市场通常一天内自动收录，**不需要**往 dsh-market 仓库提条目。
+上架动作就是在那个仓库里开一个 PR，往 `data/plugins/` 加**一个** YAML 文件（`<owner>__<repo>.yml`），**不要**手工改 README —— README 与站点都是 `node scripts/generate-readme.mjs` 从 YAML 生成的。合并后站点和市场通常一天内自动收录，**不需要**往 dsh-market 仓库提条目。
 
-两个和上架有关的元数据，本包已经带好：
+本插件的条目已经提交：[PR #15843](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/15843)。
 
-- `engines.dsh`（`>=0.2.0-rc.0 <0.3`）—— 市场卡片用它显示「需要哪个 DSH 版本」。缺了它，卡片只能从 lockstep 的 `@deepseek-ai/dsh-*` peer 里猜。
-- `icon` + `exports["./icon"]` + 包内 `icon.svg`（1 KiB，深浅色自适应）—— 市场卡片和 Settings 导航都用它。
+条目长这样（`category` 只能取列表里的值；本插件是 `model`）：
 
-为了让别人能装，包还必须能从 npm 装（或给出可用的 GitHub Release tarball）。本地目录安装只是开发路径。
+```yaml
+url: https://github.com/tsd619124/dsh-connect-comate
+name: tsd619124/dsh-connect-comate
+category: model
+icon: https://raw.githubusercontent.com/tsd619124/dsh-connect-comate/main/assets/icon-180.png
+description:
+  en: ...
+  zh: ...
+```
+
+和上架有关的元数据，本包都已经带好：
+
+- `engines.dsh`（`>=0.2.0-rc.0 <0.3`）—— 市场卡片用它显示「需要哪个 DSH 版本」。缺了它，卡片只能从 lockstep 的 `@deepseek-ai/dsh-*` peer 里猜。注意 DSH 判定它用的是 `semver.satisfies(..., {includePrerelease:true})`，所以这个范围能匹配 `0.2.2-rc.3`。
+- **peer 范围必须写显式预发布分支**（`>=0.2.0-rc.0 <0.3.0-0 || >=0.2.2-rc.0 <0.3.0-0`）。普通 npm peer 解析**不带** `includePrerelease`，只写 `>=0.2.0-rc.0 <0.3` 会匹配不到任何 `0.2.x-rc` 运行时，别人 `npm install` 直接 `ERESOLVE`。验证方式：把 Release 里的 tarball 装进一个空项目，应看到 `added N packages` 且**没有** ERESOLVE 警告。
+- `icon` + `exports["./icon"]` + 包内 `icon.svg`（1 KiB，深浅色自适应）—— Settings 导航用 SVG；市场条目另用 `assets/icon-180.png`（GitHub 托管的位图，因为列表**拒绝** SVG 与第三方图床）。
+- `assets/` 已进 `files`，`npm pack` 出来的 tarball 里带着它。
+
+为了让别人能装，包还必须能从 npm 装，或给出可用的 GitHub Release tarball：
+
+```
+https://github.com/tsd619124/dsh-connect-comate/releases/download/v0.1.0/dsh-connect-comate.tgz
+```
+
+> 资产名**不要**带版本号。带版本号时 `releases/latest/download/<name>.tgz` 会 404，因为 GitHub 只把不带版本号的名字当作稳定指向；这是 contributing.md 特意警告过的坑。
+
+本地目录安装只是开发路径，不要写进给用户的安装说明。
+
+自动化门槛（PR CI 会查）：条目数 ≤3、仓库 `package.json` 声明 `dsh.bundle`（只声明 `dsh.client` 会被拒）、仓库创建满 1 天、`awesome-lint` + 站点构建。描述会被逐句对着代码核，"夸大"是主要打回原因 —— 所以本插件的 SaaS 读不到积分、每轮重发整份 transcript 这两条，是**写进描述里**的，不是藏起来的。
 
 ---
 
