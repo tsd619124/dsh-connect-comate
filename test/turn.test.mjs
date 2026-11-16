@@ -37,7 +37,7 @@ test('a plain text turn becomes one text block', async () => {
     { kind: 'delta-batch', cid: 't1', chunks: [{ kind: 'text-delta', cid: 't1', mid: 'm1', eid: 'e1', delta: '你好', end: false }] },
     { kind: 'delta-batch', cid: 't1', chunks: [{ kind: 'text-delta', cid: 't1', mid: 'm1', eid: 'e1', delta: '，世界', end: true }] },
     { kind: 'completed', cid: 't1', status: 'completed', content: '你好，世界' },
-    { type: 'task_done', status: 'completed', conversationId: 't1' },
+    { type: 'done', status: 'completed', conversationId: 't1' },
   ], collect)
 
   assert.deepEqual(chunks.filter((c) => c.type === 'block-start'), [{ type: 'block-start', index: 0, blockType: 'text' }])
@@ -50,7 +50,7 @@ test('reasoning and text interleave as two blocks', async () => {
   const chunks = await withServer([
     { kind: 'delta-batch', cid: 't1', chunks: [{ kind: 'thinking-delta', cid: 't1', mid: 'm1', eid: 'r1', delta: '先想', end: false }] },
     { kind: 'delta-batch', cid: 't1', chunks: [{ kind: 'text-delta', cid: 't1', mid: 'm1', eid: 'e1', delta: '再答', end: false }] },
-    { type: 'task_done', status: 'completed', conversationId: 't1' },
+    { type: 'done', status: 'completed', conversationId: 't1' },
   ], collect)
 
   const starts = chunks.filter((c) => c.type === 'block-start')
@@ -67,7 +67,7 @@ test('tool elements never become tool-call blocks', async () => {
     { kind: 'delta-batch', cid: 't1', chunks: [{ kind: 'text-delta', cid: 't1', mid: 'm1', eid: 'e1', delta: '查一下', end: false }] },
     { kind: 'element-add', cid: 't1', mid: 'm1', element: { id: 'tool1', type: 'TOOL', toolName: 'read_file', toolState: 'executed', content: 'done' } },
     { kind: 'delta-batch', cid: 't1', chunks: [{ kind: 'text-delta', cid: 't1', mid: 'm1', eid: 'e1', delta: '，读到了', end: true }] },
-    { type: 'task_done', status: 'completed', conversationId: 't1' },
+    { type: 'done', status: 'completed', conversationId: 't1' },
   ], collect)
 
   assert.equal(chunks.filter((c) => c.type === 'tool-call-delta').length, 0)
@@ -90,7 +90,7 @@ test('a cancelled status becomes an aborted finish', async () => {
   const chunks = await withServer([
     { kind: 'delta-batch', cid: 't1', chunks: [{ kind: 'text-delta', cid: 't1', mid: 'm1', eid: 'e1', delta: '半截', end: false }] },
     { kind: 'completed', cid: 't1', status: 'cancelled' },
-    { type: 'task_done', status: 'cancelled', conversationId: 't1' },
+    { type: 'done', status: 'cancelled', conversationId: 't1' },
   ], collect)
 
   assert.equal(chunks.at(-1).reason.kind, 'aborted')
@@ -100,7 +100,7 @@ test('a cancelled status becomes an aborted finish', async () => {
 test('an exception with no content becomes an error finish', async () => {
   const chunks = await withServer([
     { kind: 'element-add', cid: 't1', mid: 'm1', element: { id: 'x1', type: 'EXCEPTION', content: '模型服务超时' } },
-    { type: 'task_done', status: 'completed', conversationId: 't1' },
+    { type: 'done', status: 'completed', conversationId: 't1' },
   ], collect)
 
   assert.equal(chunks.at(-1).reason.kind, 'error')
@@ -111,7 +111,7 @@ test('a growing element forwards only the new suffix', async () => {
   const chunks = await withServer([
     { kind: 'element-add', cid: 't1', mid: 'm1', element: { id: 'e1', type: 'TEXT', content: '第一句。' } },
     { kind: 'element-patch', cid: 't1', mid: 'm1', eid: 'e1', patch: { id: 'e1', type: 'TEXT', content: '第一句。第二句。' } },
-    { type: 'task_done', status: 'completed', conversationId: 't1' },
+    { type: 'done', status: 'completed', conversationId: 't1' },
   ], collect)
 
   assert.equal(chunks.filter((c) => c.type === 'text-delta').map((c) => c.text).join(''), '第一句。第二句。')
@@ -153,7 +153,7 @@ test('a pending ask becomes visible text instead of a silent stop', async () => 
         },
       },
     },
-    { type: 'task_done', status: 'completed', conversationId: 't1' },
+    { type: 'done', status: 'requires_action', conversationId: 't1' },
   ], collect)
 
   const text = chunks.filter((c) => c.type === 'text-delta').map((c) => c.text).join('')
@@ -179,7 +179,7 @@ test('an ask with no prose still produces a question block', async () => {
         detail: { kind: 'ask', questions: [{ id: 'q1', prompt: '要先做哪个？', options: [] }] },
       },
     },
-    { type: 'task_done', status: 'completed', conversationId: 't1' },
+    { type: 'done', status: 'requires_action', conversationId: 't1' },
   ], collect)
 
   const starts = chunks.filter((c) => c.type === 'block-start')
@@ -201,7 +201,7 @@ test('an executed tool is not mistaken for a pending question', async () => {
         detail: { kind: 'ask', questions: [{ id: 'q1', prompt: '这个问题已经答过了' }] },
       },
     },
-    { type: 'task_done', status: 'completed', conversationId: 't1' },
+    { type: 'done', status: 'completed', conversationId: 't1' },
   ], collect)
 
   assert.equal(chunks.filter((c) => c.type === 'text-delta').length, 0)
@@ -211,7 +211,7 @@ test('an executed tool is not mistaken for a pending question', async () => {
 test('a requires_action frame becomes a question the user can answer', async () => {
   const chunks = await withServer([
     { kind: 'requires_action', action: { toolName: 'run_command', actionType: 'confirm', resumeToken: 'c1:t1', payload: { title: '需要确认', prompt: '要执行 rm -rf build 吗', options: [{ label: '同意' }, { label: '拒绝' }] } } },
-    { type: 'task_done', status: 'completed', conversationId: 't1' },
+    { type: 'done', status: 'requires_action', conversationId: 't1' },
   ], collect)
   const text = chunks.filter((chunk) => chunk.type === 'text-delta').map((chunk) => chunk.text).join('')
 
@@ -225,9 +225,104 @@ test('a requires_action frame becomes a question the user can answer', async () 
 test('a requires_action without a prompt still names the tool', async () => {
   const chunks = await withServer([
     { kind: 'requires_action', action: { toolName: 'create_plan', actionType: 'plan' } },
-    { type: 'task_done', status: 'completed', conversationId: 't1' },
+    { type: 'done', status: 'requires_action', conversationId: 't1' },
   ], collect)
   const text = chunks.filter((chunk) => chunk.type === 'text-delta').map((chunk) => chunk.text).join('')
 
   assert.match(text, /create_plan/)
+})
+
+test('a requires_action carrying questions renders them the way the CLI sends them', async () => {
+  // `POST /session` reports the same ask as `{title, questions:[{id,prompt,options}]}`,
+  // with the turn ending on `status: requires_action`. Rendering only the
+  // flat `prompt`/`options` shape would show nothing here.
+  const chunks = await withServer([
+    {
+      kind: 'requires_action',
+      cid: 'dsh-1',
+      action: {
+        conversationId: 'dsh-1',
+        toolId: 'call_00_abc',
+        toolName: 'ask_user_question',
+        actionType: 'answer_questions',
+        resumeToken: 'dsh-1:call_00_abc',
+        payload: {
+          title: '',
+          questions: [
+            {
+              id: 'ab_choice',
+              prompt: '选 A 还是 B？',
+              options: [{ id: 'A', label: 'A' }, { id: 'B', label: 'B' }, { id: 'other_option', label: '' }],
+              selectedOptionIds: [],
+            },
+          ],
+        },
+      },
+    },
+    { type: 'done', status: 'requires_action', conversationId: 'dsh-1', action: {} },
+  ], collect)
+  const text = chunks.filter((chunk) => chunk.type === 'text-delta').map((chunk) => chunk.text).join('')
+
+  assert.match(text, /选 A 还是 B？（可选：A \/ B）/)
+  assert.match(text, /直接回答即可/)
+  assert.deepEqual(chunks.at(-1), { type: 'finish', reason: { kind: 'stop' } })
+})
+test('the same ask arriving as both an element and a frame is shown once', async () => {
+  // The server sends the pending question twice: as the `awaiting` TOOL element
+  // that opens it, and as the `requires_action` frame that ends the turn. Both
+  // carry the same `questions[]`, so showing both would duplicate the question.
+  const ask = { title: '选 A 还是 B', questions: [{ id: 'choose_ab', prompt: '选 A 还是 B？', options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] }] }
+  const chunks = await withServer([
+    {
+      kind: 'delta-batch',
+      cid: 't1',
+      chunks: [{
+        kind: 'element-add',
+        cid: 't1',
+        mid: 'm1',
+        element: { id: 'call_1', type: 'TOOL', name: 'ask_user_question', state: 'awaiting', toolState: 'awaiting', detail: { kind: 'ask', ...ask } },
+      }],
+    },
+    { kind: 'requires_action', cid: 't1', action: { conversationId: 't1', toolId: 'call_1', toolName: 'ask_user_question', actionType: 'answer_questions', payload: ask } },
+    { type: 'done', status: 'requires_action', conversationId: 't1' },
+  ], collect)
+  const text = chunks.filter((chunk) => chunk.type === 'text-delta').map((chunk) => chunk.text).join('')
+
+  // One heading, one option line, one closing line — not the whole block twice.
+  assert.equal(text.split('- 选 A 还是 B？').length - 1, 1)
+  assert.equal(text.match(/直接回答即可/g)?.length, 1)
+  assert.equal(text.match(/- 选 A 还是 B？/g)?.length, 1)
+})
+
+test('a replayed ask that was already answered is not asked again', async () => {
+  // Answering a pending ask continues the same conversation, and the server
+  // re-emits the tool call it belongs to — still `awaiting`, because that is
+  // what the transcript says happened. The turn itself ends `ok`, which is how
+  // this differs from a question that is genuinely still waiting.
+  const chunks = await withServer([
+    {
+      kind: 'delta-batch',
+      cid: 't1',
+      chunks: [{ kind: 'text-delta', cid: 't1', mid: 'm1', eid: 'e1', delta: '已收到你的选择：A。', end: true }],
+    },
+    {
+      kind: 'element-add',
+      cid: 't1',
+      mid: 'm1',
+      element: {
+        id: 'call_00_6gepph9ws7n9fp8vcrzwm28p',
+        type: 'TOOL',
+        name: 'ask_user_question',
+        state: 'awaiting',
+        toolState: 'awaiting',
+        detail: { kind: 'ask', title: '选 A 还是 B', questions: [{ id: 'choose_ab', prompt: '选 A 还是 B？', options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] }] },
+      },
+    },
+    { kind: 'completed', cid: 't1', status: 'ok', content: '已收到你的选择：A。' },
+    { type: 'done', status: 'ok', conversationId: 't1' },
+  ], collect)
+  const text = chunks.filter((chunk) => chunk.type === 'text-delta').map((chunk) => chunk.text).join('')
+
+  assert.match(text, /已收到你的选择/)
+  assert.doesNotMatch(text, /直接回答即可/)
 })

@@ -10,6 +10,11 @@ function message(id, role, text) {
   return { id, role, content: [{ type: 'text', text }] }
 }
 
+/** The ids of the messages a plan says to deliver, to assert on scope. */
+function delivered(plan) {
+  return plan.fresh.map((entry) => entry.id)
+}
+
 /** A planner with deterministic ids and a recording logger. */
 function planner() {
   let counter = 0
@@ -24,18 +29,19 @@ function planner() {
   return { instance, logs }
 }
 
-test('the first turn starts a conversation and sends the whole transcript', () => {
+test('the first turn starts a conversation and hands over the whole transcript', () => {
   const { instance } = planner()
   const messages = [message('m1', 'user', '第一句')]
   const plan = instance.plan({ sessionId: 's1', messages, system: '你是助手', model: 'auto' })
 
   assert.equal(plan.reused, false)
+  assert.equal(plan.restart, true)
   assert.equal(plan.conversationId, 'conv-1')
-  assert.match(plan.query, /你是助手/)
-  assert.match(plan.query, /第一句/)
+  // The renderer decides the wording; the planner only says what to render.
+  assert.deepEqual(delivered(plan), ['m1'])
 })
 
-test('the second turn reuses the conversation and sends only the new turn', () => {
+test('the second turn reuses the conversation and delivers only the new turn', () => {
   const { instance } = planner()
   const first = [message('m1', 'user', '第一句'), message('m2', 'assistant', '第一答')]
   const start = instance.plan({ sessionId: 's1', messages: first, model: 'auto' })
@@ -43,11 +49,10 @@ test('the second turn reuses the conversation and sends only the new turn', () =
   const plan = instance.plan({ sessionId: 's1', messages: second, model: 'auto' })
 
   assert.equal(plan.reused, true)
+  assert.equal(plan.restart, false)
   assert.equal(plan.conversationId, start.conversationId)
-  assert.match(plan.query, /第二句/)
   // The point of reuse: the earlier turns are not paid for again.
-  assert.doesNotMatch(plan.query, /第一句/)
-  assert.doesNotMatch(plan.query, /第一答/)
+  assert.deepEqual(delivered(plan), ['m3'])
 })
 
 test('a rewritten transcript starts a fresh conversation with everything', () => {
@@ -59,9 +64,10 @@ test('a rewritten transcript starts a fresh conversation with everything', () =>
   const plan = instance.plan({ sessionId: 's1', messages: compacted, model: 'auto' })
 
   assert.equal(plan.reused, false)
+  assert.equal(plan.restart, true)
   assert.notEqual(plan.conversationId, 'conv-1')
-  assert.match(plan.query, /摘要：原始问题/)
-  assert.match(plan.query, /继续/)
+  // Everything is re-sent, because the server's copy no longer matches.
+  assert.deepEqual(delivered(plan), ['c1', 'm2', 'm3'])
   assert.ok(logs.some((line) => line.includes('transcript was rewritten')))
 })
 
@@ -69,11 +75,12 @@ test('a shrunk transcript starts over instead of continuing a longer one', () =>
   const { instance, logs } = planner()
   const first = [message('m1', 'user', '一'), message('m2', 'assistant', '二'), message('m3', 'user', '三')]
   instance.plan({ sessionId: 's1', messages: first, model: 'auto' })
-  const plan = instance.plan({ sessionId: 's1', messages: first.slice(0, 1).concat(message('m4', 'user', '新')), model: 'auto' })
+  const shortened = [message('m1', 'user', '一'), message('m4', 'user', '新')]
+  const plan = instance.plan({ sessionId: 's1', messages: shortened, model: 'auto' })
 
   assert.equal(plan.reused, false)
-  assert.match(plan.query, /一/)
-  assert.ok(logs.some((line) => line.includes('transcript was rewritten') || line.includes('shrank')))
+  assert.deepEqual(delivered(plan), ['m1', 'm4'])
+  assert.ok(logs.some((line) => line.includes('transcript shrank') || line.includes('rewritten')))
 })
 
 test('switching model starts a new conversation', () => {
@@ -83,7 +90,7 @@ test('switching model starts a new conversation', () => {
   const plan = instance.plan({ sessionId: 's1', messages: [...messages, message('m2', 'user', '再来')], model: 'deepseek-v4-flash_x' })
 
   assert.equal(plan.reused, false)
-  assert.match(plan.query, /你好/)
+  assert.deepEqual(delivered(plan), ['m1', 'm2'])
   assert.ok(logs.some((line) => line.includes('model changed')))
 })
 
@@ -94,11 +101,11 @@ test('a changed system prompt starts a new conversation', () => {
   const plan = instance.plan({ sessionId: 's1', messages: [...messages, message('m2', 'user', '继续')], system: '新提示', model: 'auto' })
 
   assert.equal(plan.reused, false)
-  assert.match(plan.query, /新提示/)
+  assert.deepEqual(delivered(plan), ['m1', 'm2'])
   assert.ok(logs.some((line) => line.includes('system prompt changed')))
 })
 
-test('a turn with nothing new produces an empty query', () => {
+test('a turn with nothing new keeps the conversation and delivers nothing', () => {
   const { instance } = planner()
   const messages = [message('m1', 'user', '只有这一句')]
   const start = instance.plan({ sessionId: 's1', messages, model: 'auto' })
@@ -107,8 +114,9 @@ test('a turn with nothing new produces an empty query', () => {
   // The conversation is still healthy, there is simply nothing to send — so it
   // is reused rather than restarted, and no history is re-charged.
   assert.equal(plan.reused, true)
+  assert.equal(plan.restart, false)
   assert.equal(plan.conversationId, start.conversationId)
-  assert.equal(plan.query, '')
+  assert.deepEqual(plan.fresh, [])
 })
 
 test('sessions do not share conversations', () => {
@@ -129,7 +137,7 @@ test('forget drops the record so the next turn starts clean', () => {
 
   assert.equal(plan.reused, false)
   assert.notEqual(plan.conversationId, start.conversationId)
-  assert.match(plan.query, /一/)
+  assert.deepEqual(delivered(plan), ['m1', 'm2'])
 })
 
 test('conversationIdOf reports without creating a record', () => {

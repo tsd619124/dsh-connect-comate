@@ -14,6 +14,8 @@
 | 模型目录 | `llm.listModels` / `resolveModel` | 读 Comate 的账号级模型清单；拿不到时退回 `auto` |
 | 设置页 `Comate` | `settings.section`（order 36） | 在 Settings 里勾选**要用哪几个模型**，没勾的不进模型选择器 |
 | 提问转述 | `lib/turn.js` | Comate 中途中止等用户选择时，把问题渲染成一条可见回复，你答一句它就接着做 |
+| 推理等级 | `llm.resolveModel` → `reasoning` | 按 Comate 自己给的档位（`low / high / max`）在模型选择器里开关；只有真的带 `effortConfig` 的模型才声明 |
+| 图片输入 | `llm.resolveModel` → `inputModalities` | 声明能吃图的模型在 DSH 里会收到真实的图片块；插件自己上传后只把数字 id 交给 `zulu serve` |
 | 积分 / 用量查询工具 | `comate_usage` | 对话里问「今天用了多少积分 / tokens」，只读：积分走接口，token 走 Comate 自己的会话记录 |
 | 只读状态接口 | `/plugins/dsh-connect-comate/{status,state,models,usage,refresh}` | 状态、目录与选择、模型、积分、手动清缓存；全部 GET |
 | 唯一写接口 | `POST /plugins/dsh-connect-comate/__save` | 保存模型勾选；走 `settings.mutate` 并回读校验 |
@@ -108,6 +110,14 @@ Comate 的账号级目录有十几个模型（Deepseek、GLM、ERNIE、Kimi、Mi
 **一个 DSH 会话 = 一个 Comate 会话**。第一轮把整份 transcript 渲染成 query 发过去并记住这是哪个 conversationId；之后每轮**只发新增的内容**，靠 Comate 服务端自己的会话记忆续上。实测它跨轮、甚至跨 `zulu serve` 进程重启都记得（会话落在 `~/.comate-engine/store`），所以不需要重发历史。
 
 只在四种情况下重开会话（并重发整份 transcript）：transcript 被改写（DSH 侧压缩过）、transcript 变短、切了模型、system prompt 变了。判断逻辑在 `lib/history.js`，每一种都会在日志里写明原因（`comate conversation restart (<reason>)`）。剩下唯一「什么都不发」的情况是 transcript 与上一轮完全相同 —— 那时不会为了空转去重启一个健康的会话。
+
+### 推理等级与图片
+
+Comate 的模型目录里，大部分模型只告诉你「支不支持思考」，只有 `Deepseek V4.1 Flash` 和 `GLM-5.3` 真的给出了**档位**（`low / high / max`，默认 `max`）。插件照着上游说的话做：有档位的模型在 DSH 里就能选推理等级，没档位的**不声明** —— 因为 DSH 对未声明的等级是直接报错（`does not support reasoning effort`），而不是悄悄忽略。宁可选择器里没有这一项，也不要给你一个选了不生效的开关。
+
+图片是另一回事。模型目录里的 `supportImage` 决定插件声明 `inputModalities`：能吃图的模型（当前 6 个：Deepseek V4.1 Flash、ERNIE 5.5 Flash Preview、GLM-5.3-Flash、GLM-5v-Turbo、Kimi-K2.6、MiniMax M3）在 DSH 里会收到真实图片块；其余模型显式声明为纯文本，这时候 DSH 会在组请求前把图片投影成文字占位，**这一轮仍然能用**，而不是发过去让 Comate 报错。
+
+附件目录拿不到时（比如没装 attachment 插件、或 roster 暂时拉不下来），图片会降级成正文里的「图片 N 张（未随文本传递）」，不会让整轮失败。内部版（`ptoken` 登录）目前不支持图片：Comate 的上传端点只认 license，插件会在本地就拒绝，而不是发过去吃一个 401。
 
 ### 需要你选择和确认时
 
@@ -216,6 +226,10 @@ Settings 面板里可改，全部 `.volatile()`，改完即生效、不用重启
 
 **一个 DSH 会话复用一个 Comate 会话，只在必要时重开。** 早期版本每轮换新 conversationId 并重发整份 transcript，理由是「`zulu serve` 只有 `query` 一个字段，依赖它的记忆会让 DSH 的压缩对它不可见」。前半句是对的，后半句用真机打探针证伪了：同一个 conversationId 连发两轮，甚至杀掉 `zulu serve` 重启之后，Comate 仍然记得上一轮说的话（会话在 `~/.comate-engine/store`）。所以现在默认复用，只在 transcript 被改写 / 变短 / 换模型 / 换 system prompt 这四种「服务端的世界与 DSH 的世界不再一致」的情况下重开，每次重开都在日志里写明原因。
 
+**推理等级和图片只能走 `POST /session`。** Comate 的 HTTP API 有两个入口：`/api/v1/conversations/:id/messages` 和 `POST /session`。前者的请求白名单只取 14 个字段，`thinkingEnabled` 和 `effort` **不在里面** —— 你在 body 里传了它也不报错，直接丢掉。这正是「设置里能选推理等级但选了没用」的成因。`/session` 反过来把整个 body 交给会话注册表，`registry.configure(sessionId, {model, mode, thinkingEnabled, effort, …})` 会真的写进去，再由上游的 `POST …/v2/execute` 带出去（用本地代理截过包，`"effort":"low"` 与 `"effort":"max"` 确实不同）。代价是 `/session` 的模型字段必须用带哈希的真实 id（`deepseek-v4.1-flash_4827e…`），显示名会 `zulu.service.model.unavailable`；它的终帧是 `{kind:'completed'}` + `{type:'done'}` 而不是 `task_done`。
+
+**图片由插件自己上传，只把数字 id 交给 serve。** `attachImages` 本来接受本地路径，由 `zulu serve` 自己上传 —— 但在 serve 进程里那条路是坏的：上传请求要带 `login-name` 头，而头部值取自 `getAuthInfo()`，serve 的启动路径没走过 license 校验，`authType` 不是 `'license'`，于是头是空的，服务端回 `401 license为空`，整轮变成 `status: exception`。绕法在源码里现成：`attachImages` 的元素若是纯数字字符串，serve 直接 `return {id, name: 'image-N', type:'IMAGE'}`，**跳过上传**。所以插件用 license 自己打 `…/autowork/v1/file/upload`，拿到 `data.id` 再发 `attachImages: ['788264']`，真机回得出图片里的字。上传失败不失败整轮，降级成文本占位。
+
 **端口自己挑，不信 `--port 0`。** `zulu serve --port 0` 会把 `0` 原样回显，pid 文件里也写 `0`，而实际绑定的是内核挑的临时端口。所以本插件在 18810–18899 里自己探一个空闲端口再 spawn。
 
 **鉴权只能靠 CLI 参数。** `zulu serve` 启动时会 `delete process.env.ZULU_SERVE_*`，再从 `--license` / `--ptoken` / `--username` 重建。所以环境变量那条路是死的，凭证必须以参数传；且三者互斥。
@@ -291,9 +305,9 @@ let platform = process.env.PLATFORM || PLATFORM.INTERNAL   // 默认内网
 - **只支持 SaaS / 内网 / POC 三种部署**，按 `cli-login.json` 的 `platform` 自动注入 `PLATFORM`（见上一节）。内网模型目录与积分端点（`oneapi-comate.baidu-int.com`）在本机不可达，未做端到端验证。
 - **SaaS 账号拿不到「剩余多少积分」这个绝对值**。`/api/openapi/v3/agent/daily_cost` 对真实 license 仍返回 `data: null`（带 `login-name` 头、换 `key` 参数、`user/quota` 端点都试过），积分面板是内网 `fetchUserQuota` + `kernel/quota/planUsageStatus` 专有的。作为替代，插件读 Comate 自己写的会话记录（`~/.comate-engine/store`）给出**真实 token 用量**与**按模型倍率折算的相对消耗**，见下一节。
 - **未做 Comate IDE 的登录态复用**。IDE 把凭据存在 Electron `safeStorage` 里（`state.vscdb` 的 `comate_login_ID` 等），需要 GUI 授权才能解。CLI 登录是干净路径。
-- **图片与附件未接**。`zulu serve` 的 `attachImages` / `attachFiles` 字段存在，但格式未验证，所以没有转发。
-- **需要人工批准时只转述问题，不能代替你点「同意」**（`requires_action` 帧与本条同样处理）。Comate 会发 `awaiting` 的工具元素并结束这一轮；插件把问题渲染成一条可见的回复（含选项），**你直接回答即可** —— 答案会作为同一会话的下一轮发给 Comate 继续执行（已端到端验证）。但审批类工具（如 `run_command` 的确认）目前不会自动放行，也不会弹出 DSH 的确认卡片；协议里的 `{kind:'requires_action'}` 帧已同样转成可见提问（真机上 `ask_user_question` 那条路先触发，所以这一帧尚未实测到）。
-- **DuMate 未接入**。DuMate 的积分类接口走 BCE console 签名（加密 cookie），且本机 DuMate 起不来，没有可验证的通路。本仓库不含 DuMate 支持。
+- **文件附件仍未接**。图片已经接上（见上一节）；`attachFiles` 走的是另一套上传与引用格式，没有验证，所以没有转发 —— 附文件时正文里会写明「内容未随文本传递」。
+- **需要人工批准时只转述问题，不能代替你点「同意」**。Comate 会发 `awaiting` 的工具元素、并以 `{kind:'requires_action'}` 帧结束这一轮；两条路都渲染成一条可见回复（含选项），**你直接回答即可** —— 答案作为同一会话的下一轮发回去，Comate 接着做完（已端到端验证）。审批类工具（如 `run_command` 的确认）不会自动放行，也不会弹出 DSH 的确认卡片。边角处理：同一个提问会同时以元素和帧到达（按文本去重），而**回答过的提问在下一轮会被服务端重播一遍**，所以只有在那一轮不是正常结束（`ok` / `completed`）时才把提问亮出来。
+- **DuMate 不在本仓库里**。DuMate 已另起一个独立插件 `dsh-connect-dumate`（同一作者），与本插件互不依赖、可共存；两者共享的只有三份零依赖小工具（`lib/guards.js`、`lib/catalog.js`、`lib/settings.js`）。那条旧判断里「DuMate 起不来」和「积分类接口走 BCE 签名、没有可验证通路」都在 2026-11-16 被证伪：桌面版能正常启动，模型走的是本机 `dumate-main-server` 上**完全免鉴权**的 `/api/qianfanproxy/v1`，积分走同端口带 `X-Dumate-Inapp-Key` 的 `/api/dumate/points/quota_overview`（那个 key 由 Electron 主进程每启动一次随机生成，从 `dumate-main-server` 的进程环境读）。细节见 `dsh-connect-dumate` 的 README。
 
 ---
 

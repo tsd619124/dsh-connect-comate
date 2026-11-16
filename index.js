@@ -42,7 +42,7 @@ export const SETTINGS_NS = 'dsh-connect-comate'
 const ROUTE_PREFIX = '/plugins/dsh-connect-comate'
 
 /** The plugin's own version, for attribution and for the status card. */
-const VERSION = '0.2.1'
+const VERSION = '0.3.0'
 
 /** The `zulu` CLI generation these endpoints are written against. */
 const ZULU_VERSION = '1.8.1'
@@ -151,6 +151,9 @@ async function activate(ctx, config) {
     serverFor,
     newConversationId: () => `dsh-${randomUUID()}`,
     resolveWorkingDirectory: (sessionId) => resolveWorkingDirectory(ctx, config, sessionId),
+    // Resolved lazily: the attachment store is mounted by its own plugin, and a
+    // profile without it still runs text-only conversations.
+    attachments: () => ctx.get('attachments'),
     log,
   })
 
@@ -180,6 +183,9 @@ async function activate(ctx, config) {
       id: model.id,
       name: model.name,
       ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
+      // Advertised here so the settings page can show which models accept a
+      // picture before a conversation is started, not only when one fails.
+      inputModalities: model.supportsImage === true ? ['text', 'image'] : ['text'],
     }))
   }))
 
@@ -364,6 +370,9 @@ function buildRoutes(options) {
             ...(model.description === undefined ? {} : { description: model.description }),
             ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
             ...(model.ratio === undefined ? {} : { ratio: model.ratio }),
+            supportsImage: model.supportsImage === true,
+            supportsThinking: model.supportsThinking === true,
+            ...(model.reasoning === undefined ? {} : { reasoning: model.reasoning }),
           })),
           enabledModelIds: enabledIds,
           visibleModelIds: visibleModelIds(roster, enabledIds),

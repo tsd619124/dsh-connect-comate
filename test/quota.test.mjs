@@ -121,3 +121,98 @@ test('a roster entry carries its multiplier through', async () => {
   const models = await fetchModels({ credential: { kind: 'license', value: 'ratio-fetch-1' }, userAgent: 'test' })
   assert.equal(models[0].ratio, 0.3)
 })
+
+test('image support survives the roster mapping', async () => {
+  invalidateComateCaches()
+  const stub = stubFetch({
+    status: 'OK',
+    data: {
+      models: [
+        { modelId: 'sees', displayName: 'Sees', supportImage: true },
+        { modelId: 'blind', displayName: 'Blind', supportImage: false },
+        { modelId: 'unknown', displayName: 'Unknown' },
+      ],
+    },
+  })
+  try {
+    const models = await fetchModels({ credential: license, userAgent: 'test/1.0' })
+    const byId = Object.fromEntries(models.map((model) => [model.id, model]))
+    // `undefined` and `false` both mean "do not advertise image input"; only an
+    // explicit `true` is evidence that a picture can be read.
+    assert.equal(byId.sees.supportsImage, true)
+    assert.equal(byId.blind.supportsImage, false)
+    assert.equal(byId.unknown.supportsImage, false)
+  } finally {
+    stub.restore()
+    invalidateComateCaches()
+  }
+})
+
+test('effort levels come only from an effortConfig, never from supportEffort', async () => {
+  invalidateComateCaches()
+  const stub = stubFetch({
+    status: 'OK',
+    data: {
+      models: [
+        {
+          modelId: 'has-levels',
+          displayName: 'Has Levels',
+          supportEffort: 'max',
+          effortConfig: {
+            paramKey: 'effort',
+            defaultLevel: 'max',
+            levels: [{ label: 'Low', value: 'low' }, { label: 'High', value: 'high' }, { label: 'Max', value: 'max' }],
+          },
+        },
+        // A single `supportEffort` string names *one* depth, not a set to pick
+        // from. Inventing levels from it would offer choices the model rejects.
+        { modelId: 'only-a-string', displayName: 'Only A String', supportEffort: 'medium', effortConfig: null },
+        {
+          modelId: 'odd-default',
+          displayName: 'Odd Default',
+          effortConfig: { defaultLevel: 'nope', levels: [{ label: 'Low', value: 'low' }, { label: 'Low again', value: 'low' }] },
+        },
+      ],
+    },
+  })
+  try {
+    const models = await fetchModels({ credential: license, userAgent: 'test/1.0' })
+    const byId = Object.fromEntries(models.map((model) => [model.id, model]))
+    assert.deepEqual(byId['has-levels'].reasoning, {
+      efforts: [
+        { id: 'low', name: 'Low' },
+        { id: 'high', name: 'High' },
+        { id: 'max', name: 'Max' },
+      ],
+      defaultEffort: 'max',
+    })
+    assert.equal(byId['only-a-string'].reasoning, undefined)
+    assert.equal(Object.hasOwn(byId['only-a-string'], 'reasoning'), false)
+    // A default outside the offered levels is replaced by the first real level,
+    // and duplicated values collapse: DSH rejects both.
+    assert.deepEqual(byId['odd-default'].reasoning, {
+      efforts: [{ id: 'low', name: 'Low' }],
+      defaultEffort: 'low',
+    })
+  } finally {
+    stub.restore()
+    invalidateComateCaches()
+  }
+})
+
+test('thinking support is read from the roster', async () => {
+  invalidateComateCaches()
+  const stub = stubFetch({
+    status: 'OK',
+    data: { models: [{ modelId: 'thinks', displayName: 'Thinks', supportThinking: true }, { modelId: 'plain', displayName: 'Plain' }] },
+  })
+  try {
+    const models = await fetchModels({ credential: license, userAgent: 'test/1.0' })
+    const byId = Object.fromEntries(models.map((model) => [model.id, model]))
+    assert.equal(byId.thinks.supportsThinking, true)
+    assert.equal(byId.plain.supportsThinking, false)
+  } finally {
+    stub.restore()
+    invalidateComateCaches()
+  }
+})
