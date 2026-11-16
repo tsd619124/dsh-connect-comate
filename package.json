@@ -2,7 +2,7 @@
   "name": "dsh-connect-comate",
   "displayName": "DSH Connect Comate",
   "description": "把本机已登录的文心快码（Comate / Zulu）接成 DSH 的模型 provider，含设置页模型勾选、提问转述与只读用量查询",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "author": "fengguanjia",
   "license": "MIT",
   "keywords": [

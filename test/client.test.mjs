@@ -191,6 +191,24 @@ const ROSTER = [
 ]
 
 /**
+ * One roster entry carrying every capability the row can print.
+ *
+ * Kept apart from `ROSTER` so the mode and count assertions keep describing the
+ * same three models while this one exercises the meta column.
+ */
+const CAPABLE = {
+  id: 'deepseek-v4.1-flash_dddd',
+  name: 'Deepseek V4.1 Flash',
+  contextWindow: 1000000,
+  supportsImage: true,
+  supportsThinking: true,
+  reasoning: {
+    efforts: [{ id: 'low', name: 'Low' }, { id: 'high', name: 'High' }, { id: 'max', name: 'Max' }],
+    defaultEffort: 'max',
+  },
+}
+
+/**
  * Install a fetch stub for the duration of `body`.
  *
  * @param state - the `/state` body.
@@ -271,6 +289,27 @@ test('a stored selection renders as manual mode with only those ticks', async ()
     assert.deepEqual(boxes.map((box) => box.props.checked), [false, true, false])
     assert.ok(boxes.every((box) => box.props.disabled === false), 'manual mode makes the ticks editable')
     assert.ok(React.textOf(mounted.tree).includes('已选 1 / 3'))
+  })
+})
+
+test('a row names the image input and the effort levels it actually has', async () => {
+  const { section } = mountSection()
+  const roster = [...ROSTER, CAPABLE]
+  await withFetch({ signedIn: true, roster, enabledModelIds: [] }, async () => {
+    const mounted = await React.mount(section.component, section.registration.inject())
+    const rows = React.findAll(mounted.tree, (node) => node.type === 'li')
+
+    assert.equal(rows.length, roster.length)
+    const byName = new Map(rows.map((row) => [React.findAll(row, (node) => node.type === 'span' && String(node.props.className ?? '').includes('dsm-comate-item-name'))[0].children[0], React.textOf(row)]))
+
+    const capable = byName.get('Deepseek V4.1 Flash')
+    assert.ok(capable.includes('1M 上下文'), 'the context window still leads the column')
+    assert.ok(capable.includes('图片输入'), 'a vision model says so without opening the composer')
+    assert.ok(capable.includes('推理 Low / High / Max'), 'the levels come from the roster, not a guess')
+
+    const textOnly = byName.get('Kimi-K2.6')
+    assert.equal(textOnly.includes('图片输入'), false, 'a model the roster does not mark as vision stays silent')
+    assert.equal(textOnly.includes('推理'), false, 'a model without effort levels does not advertise an empty control')
   })
 })
 

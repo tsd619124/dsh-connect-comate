@@ -92,6 +92,7 @@ Comate 的账号级目录有十几个模型（Deepseek、GLM、ERNIE、Kimi、Mi
 - 点「手动选择」后勾你想用的，保存即可；没勾的模型**不会出现在模型选择器里**，也不会出现在 `/models` 与模型发现结果里。
 - 「至少留一个」是硬约束：勾到 0 个时保存按钮会禁用并提示，因为空选择在语义上等于「跟随上游」，勾 0 个却又想用是矛盾的。
 - 「恢复跟随上游」会把配置写回空数组。
+- 每一行右侧直接写出这个模型能收什么：上下文窗口、`图片输入`（只有上游 `supportImage` 为真的 6 个模型才有）、`推理 Low / High / Max`（只有带 `effortConfig` 的两个模型才有）。它和 composer 里的控件是同一条数据 —— 某行没写「推理」，就说明这个模型在 composer 里根本不会有 Effort 行，而不是那个开关坏了。
 
 写入路径是 `POST /plugins/dsh-connect-comate/__save` → host 侧 `settings.mutate(ns, [{op:'set', path:['enabledModelIds'], value}])`，**写完立刻重新 `describe()` 回读并深比较**；不一致会把「没落地」如实报成失败，而不是假装保存成功。这是刻意的：`mutate` resolve 不代表值真的写进了文档。
 

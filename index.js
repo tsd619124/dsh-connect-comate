@@ -42,7 +42,7 @@ export const SETTINGS_NS = 'dsh-connect-comate'
 const ROUTE_PREFIX = '/plugins/dsh-connect-comate'
 
 /** The plugin's own version, for attribution and for the status card. */
-const VERSION = '0.3.0'
+const VERSION = '0.3.1'
 
 /** The `zulu` CLI generation these endpoints are written against. */
 const ZULU_VERSION = '1.8.1'

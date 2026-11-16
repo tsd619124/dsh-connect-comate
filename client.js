@@ -87,6 +87,8 @@ window.__ModuleLoader__.load({
       'notice.signedOutLoad': '没找到 Comate 登录凭证，读不到模型目录。先在终端执行一次 `zulu login`。',
       'model.context': '{value}K 上下文',
       'model.contextMillion': '{value}M 上下文',
+      'model.image': '图片输入',
+      'model.efforts': '推理 {levels}',
       'usage.title': '今日积分',
       'usage.unavailable': '读不到积分数据',
       'todo.title': '未完成',
@@ -122,6 +124,8 @@ window.__ModuleLoader__.load({
       'notice.signedOutLoad': 'No Comate sign-in was found, so there is no directory to read. Run `zulu login` in a terminal first.',
       'model.context': '{value}K context',
       'model.contextMillion': '{value}M context',
+      'model.image': 'Image input',
+      'model.efforts': 'Effort {levels}',
       'usage.title': 'Today\'s credits',
       'usage.unavailable': 'No credit data',
       'todo.title': 'Not done yet',
@@ -199,6 +203,7 @@ window.__ModuleLoader__.load({
       '.dsm-comate-item label{display:flex;align-items:center;gap:8px;cursor:pointer;min-width:0;flex:1}',
       '.dsm-comate-item-name{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
       '.dsm-comate-item-meta{font-size:11px;color:var(--dsw-alias-label-secondary,#8a8f98);white-space:nowrap}',
+      '.dsm-comate-item-part-next{margin-left:8px;padding-left:8px;border-left:1px solid var(--dsw-alias-border-l2,#3a3b40)}',
       '.dsm-comate-empty{margin:0;padding:16px 12px;font-size:12px;color:var(--dsw-alias-label-secondary,#8a8f98)}',
       '.dsm-comate-note{margin:0;font-size:12px;line-height:1.6}',
       '.dsm-comate-note-ok{color:var(--dsw-alias-state-success-primary,#12b76a)}',
@@ -322,6 +327,31 @@ window.__ModuleLoader__.load({
       if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return ''
       if (value >= 1000 && value % 100000 === 0) return t('model.contextMillion', { value: value / 1000000 })
       return t('model.context', { value: Math.round(value / 1000) })
+    }
+
+    /**
+     * Describe what a model can take and how hard it can think.
+     *
+     * The roster already carries the two capabilities that decide whether a
+     * control appears in the composer at all: a model without `reasoning` has
+     * no effort row, and a model whose `supportsImage` is false is declared
+     * text-only, so DSH folds images into a text placeholder instead of
+     * sending them. Showing that here is the difference between "the picker
+     * has no effort row" and "this model never had one".
+     *
+     * @param t - translator.
+     * @param model - one roster entry from `/state`.
+     * @returns the meta parts, in the order they read best.
+     */
+    function capabilityLabels(t, model) {
+      const parts = []
+      if (model?.supportsImage === true) parts.push(t('model.image'))
+      const efforts = Array.isArray(model?.reasoning?.efforts) ? model.reasoning.efforts : []
+      if (efforts.length > 0) {
+        const levels = efforts.map((effort) => effort?.name ?? effort?.id).filter((name) => typeof name === 'string' && name !== '')
+        if (levels.length > 0) parts.push(t('model.efforts', { levels: levels.join(' / ') }))
+      }
+      return parts
     }
 
     /**
@@ -506,7 +536,10 @@ window.__ModuleLoader__.load({
         ? h('p', { className: 'dsm-comate-empty' }, signedIn ? t('usage.unavailable') : t('notice.signedOutLoad'))
         : h('ul', { className: 'dsm-comate-list' }, roster.map((model) => {
           const checked = activeMode === 'auto' || draft.includes(model.id)
-          const meta = contextLabel(t, model.contextWindow)
+          // Context first, then the capabilities in the same column: a row is
+          // read as "which model, how big, what it takes".
+          const meta = [contextLabel(t, model.contextWindow), ...capabilityLabels(t, model)]
+            .filter((part) => part !== '')
           return h('li', { key: model.id, className: 'dsm-comate-item' },
             h('label', null,
               h('input', {
@@ -520,7 +553,12 @@ window.__ModuleLoader__.load({
               }),
               h('span', { className: 'dsm-comate-item-name' }, model.name ?? model.id),
             ),
-            meta === '' ? null : h('span', { className: 'dsm-comate-item-meta' }, meta),
+            meta.length === 0
+              ? null
+              : h('span', { className: 'dsm-comate-item-meta' }, meta.map((part, index) => h('span', {
+                key: `${model.id}-${index}`,
+                className: index === 0 ? 'dsm-comate-item-part' : 'dsm-comate-item-part dsm-comate-item-part-next',
+              }, part))),
           )
         }))
 
