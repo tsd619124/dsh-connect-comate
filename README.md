@@ -104,29 +104,51 @@ Comate 的账号级目录有十几个模型（Deepseek、GLM、ERNIE、Kimi、Mi
 
 在模型选择器里选 `comate / auto`（或登录后出现的具体模型），然后正常对话。
 
-**一次请求 = 一次 `zulu serve` 轮次**。每轮都会新建 conversationId，并把整份 transcript 渲染成单个 query 发过去。这是刻意的：`zulu serve` 的请求体只有 `query` 一个字段，没有多消息、没有工具 schema；如果反过来依赖 zulu 自己的会话记忆，DSH 侧的上下文压缩对它就是不可见的，压缩后模型会以为对话凭空开始。
+**一个 DSH 会话 = 一个 Comate 会话**。第一轮把整份 transcript 渲染成 query 发过去并记住这是哪个 conversationId；之后每轮**只发新增的内容**，靠 Comate 服务端自己的会话记忆续上。实测它跨轮、甚至跨 `zulu serve` 进程重启都记得（会话落在 `~/.comate-engine/store`），所以不需要重发历史。
 
-代价：长对话每轮都要重发整份 transcript，token 消耗随轮数线性增长。这是 `zulu serve` 协议的硬约束，不是实现选择。
+只在四种情况下重开会话（并重发整份 transcript）：transcript 被改写（DSH 侧压缩过）、transcript 变短、切了模型、system prompt 变了。判断逻辑在 `lib/history.js`，每一种都会在日志里写明原因（`comate conversation restart (<reason>)`）。剩下唯一「什么都不发」的情况是 transcript 与上一轮完全相同 —— 那时不会为了空转去重启一个健康的会话。
 
-### 查积分
+### 需要你选择和确认时
 
-在对话里问「今天 Comate 用了多少积分」，或者直接调用 `comate_usage` 工具：
+Comate 的 `ask_user_question` 触发时，服务端会发一条 `awaiting` 的工具元素然后结束这一轮。插件把它渲染成一条**看得见的提问**，例如：
+
+```
+请选择
+- 选 A 还是 B（可选：A / B）
+
+直接回答即可，我会把答案转给 Comate 继续这次会话。
+```
+
+你直接回复「选 A」，插件会把这句话作为同一 Comate 会话的下一轮发过去，Comate 就接着原来的上下文继续（已端到端验证）。**不需要**重新解释前文，也不需要 `/sessions/:id/tool-results` 那套 resumeToken 协议。
+
+### 查用量
+
+在对话里问「今天 Comate 用了多少 tokens」，或者直接调用 `comate_usage` 工具。它读两处：
+
+1. **积分接口**（`/api/openapi/v3/agent/daily_cost`）—— 公有云 SaaS 账号在这里拿到的是 `data: null`，所以这一半通常报 `no-data`；内网部署能拿到真实数字。
+2. **Comate 自己的会话记录**（`~/.comate-engine/store/chat_session_<uuid>`）—— 每条 assistant 消息都带 `tokenUsage` 与 `modelUsage`，这是**真实发生的 token 消耗**，SaaS 账号同样有。
 
 ```json
 {
-  "available": true,
-  "summary": "今日已用 42 积分，剩余 958",
-  "usedQuota": 42,
-  "remainingQuota": 958,
-  "monthQuotaLimit": 1000,
-  "requestCount": 17,
-  "unlimited": false,
+  "available": false,
+  "summary": "Comate 没有返回今日积分数据（可能该账号不计费）",
+  "tokens": "本会话累计 212.1k tokens（7 次模型调用），输入 10.6k / 输出 1.0k，缓存命中 200.4k，上下文 40.0k/1.0M（4.0%），按模型倍率约 63.6 倍额度",
+  "totalTokens": 212051,
+  "promptTokens": 10597,
+  "completionTokens": 1006,
+  "cacheReadTokens": 200448,
+  "callCount": 7,
+  "contextUsed": 40036,
+  "contextLimit": 1000000,
+  "creditMultiplier": 63.6153,
   "signedIn": true,
   "credentialKind": "license"
 }
 ```
 
-未登录时它不会抛错，而是老实说清楚：
+`creditMultiplier` 是把每个模型实际 token 数按其倍率（模型目录里的 `ratio`：`0.1x` 到 `1x`）加权后除以 1000 —— 这是唯一能给出的绝对量级参考，不是货币单位。
+
+未登录时它不会抛错：
 
 ```json
 {
@@ -151,7 +173,7 @@ curl http://127.0.0.1:52815/plugins/dsh-connect-comate/state
 # 模型清单（已按选择收窄）
 curl http://127.0.0.1:52815/plugins/dsh-connect-comate/models
 
-# 积分
+# 积分 + 真实 token 用量
 curl http://127.0.0.1:52815/plugins/dsh-connect-comate/usage
 
 # 手动失效缓存（60 秒 TTL）
@@ -189,7 +211,9 @@ Settings 面板里可改，全部 `.volatile()`，改完即生效、不用重启
 
 > 这里踩过一个坑值得记：policy 的形状必须是 `{mode, maxRetries, retryableCodes, initialDelayMs, maxDelayMs, jitterRatio}`。手写 `{maxAttempts}` **不会报错** —— `llm-retry` 读 `policy.mode` 判断有没有上限，读到 `undefined` 就变成无限重试；读 `policy.initialDelayMs` 得到 `NaN`，退避变成 0ms。全绿测试也照样过，因为没有任何一处校验这个对象。
 
-**TOOL 元素不进 transcript。** Comate 的 agent 自己跑工具循环，它的 `TOOL` 元素描述的是 CLI 正在读哪个文件、跑哪条命令 —— 不是在请求 DSH 执行工具。把它们翻成 `tool-call` 会让 DSH **二次执行**同一件事，所以它们只被计数，不进正文。
+**TOOL 元素不进 transcript，除了「等你回答」的那一个。** Comate 的 agent 自己跑工具循环，它的 `TOOL` 元素描述的是 CLI 正在读哪个文件、跑哪条命令 —— 不是在请求 DSH 执行工具。把它们翻成 `tool-call` 会让 DSH **二次执行**同一件事，所以它们只被计数，不进正文。唯一的例外是 `awaiting` 的 `ask_user_question`：那不是工具调用，是**提问**，被渲染成一段可见文字，你回复的内容就是下一轮。
+
+**一个 DSH 会话复用一个 Comate 会话，只在必要时重开。** 早期版本每轮换新 conversationId 并重发整份 transcript，理由是「`zulu serve` 只有 `query` 一个字段，依赖它的记忆会让 DSH 的压缩对它不可见」。前半句是对的，后半句用真机打探针证伪了：同一个 conversationId 连发两轮，甚至杀掉 `zulu serve` 重启之后，Comate 仍然记得上一轮说的话（会话在 `~/.comate-engine/store`）。所以现在默认复用，只在 transcript 被改写 / 变短 / 换模型 / 换 system prompt 这四种「服务端的世界与 DSH 的世界不再一致」的情况下重开，每次重开都在日志里写明原因。
 
 **端口自己挑，不信 `--port 0`。** `zulu serve --port 0` 会把 `0` 原样回显，pid 文件里也写 `0`，而实际绑定的是内核挑的临时端口。所以本插件在 18810–18899 里自己探一个空闲端口再 spawn。
 
@@ -212,10 +236,11 @@ cd dsh-connect-comate
 node --import ./test/register-loader.mjs --test "test/*.test.mjs"
 ```
 
-90 个测试，全部在无 Host 环境下跑。两处替身：
+116 个测试，全部在无 Host 环境下跑。三处替身：
 
 - `test/loader.mjs` 是 Node loader hook，把 `@deepseek-ai/dsh-llm` 重定向到 `test/fixtures/dsh-llm.js`（镜像真实 base class 的默认方法与 `resolveRetryPolicy` 的形状），把 `@deepseek-ai/schemastery` 指向 profile 里的真实包。
 - `test/fixtures/react.js` 是最小 React（`createElement` / `useState` / `useEffect` / `mount`），让 Settings 页能在 Node 里被真正渲染和断言，不需要浏览器。
+- `test/usage.test.mjs` 用 `DSH_CONNECT_COMATE_STORE` 把会话存储指到临时目录，绝不读开发机上真实的 `~/.comate-engine/store`。
 
 注意 glob 要加引号，直接写 `node --test test/` 会因为 loader 的交互报错。`test/setup.mjs` 会拦掉**所有非回环** `fetch` —— 测试不该打真实网络，但 `turn.test.mjs` 需要本地 `http.createServer` 喂 SSE，所以回环放行。
 
@@ -228,8 +253,10 @@ index.js             插件入口：注册 provider、发现、工具、路由
 client.js            Settings 页：模型勾选（window.__ModuleLoader__ 工厂）
 lib/adapter.js       LlmAdapter 实现
 lib/zulu.js          zulu serve 的启动、健康门禁、关闭
-lib/turn.js          SSE → StreamChunk 翻译
-lib/prompt.js        transcript → 单个 query 的渲染
+lib/turn.js          SSE → StreamChunk 翻译，含 awaiting 提问
+lib/prompt.js        transcript → query（整份 / 增量两种渲染）
+lib/history.js       会话复用与重开判定
+lib/usage.js         从 Comate 会话记录读 token 用量
 lib/quota.js         模型目录 + 积分（60s 缓存）
 lib/catalog.js       模型白名单的选择与收窄
 lib/settings.js      /__save 的写入与回读校验
@@ -261,10 +288,10 @@ let platform = process.env.PLATFORM || PLATFORM.INTERNAL   // 默认内网
 ## 已知边界
 
 - **只支持 SaaS / 内网 / POC 三种部署**，按 `cli-login.json` 的 `platform` 自动注入 `PLATFORM`（见上一节）。内网模型目录与积分端点（`oneapi-comate.baidu-int.com`）在本机不可达，未做端到端验证。
-- **SaaS 账号读不到积分数字**。`/api/openapi/v3/agent/daily_cost` 对真实 license 仍返回 `data: null`，`comate_usage` 工具只能诚实报 `no-data`。积分面板是内网 `fetchUserQuota` + `kernel/quota/planUsageStatus` 专有的，CLI 侧没有对应通路。
+- **SaaS 账号拿不到「剩余多少积分」这个绝对值**。`/api/openapi/v3/agent/daily_cost` 对真实 license 仍返回 `data: null`（带 `login-name` 头、换 `key` 参数、`user/quota` 端点都试过），积分面板是内网 `fetchUserQuota` + `kernel/quota/planUsageStatus` 专有的。作为替代，插件读 Comate 自己写的会话记录（`~/.comate-engine/store`）给出**真实 token 用量**与**按模型倍率折算的相对消耗**，见下一节。
 - **未做 Comate IDE 的登录态复用**。IDE 把凭据存在 Electron `safeStorage` 里（`state.vscdb` 的 `comate_login_ID` 等），需要 GUI 授权才能解。CLI 登录是干净路径。
 - **图片与附件未接**。`zulu serve` 的 `attachImages` / `attachFiles` 字段存在，但格式未验证，所以没有转发。
-- **requires_action 未处理**。Comate 在需要人工批准时会发 `{kind:'requires_action'}` 并结束轮次。本插件目前把它当作普通结束，用户会看到一轮提前结束的回复。这一条留作后续。
+- **需要人工批准时只转述问题，不能代替你点「同意」**。Comate 会发 `awaiting` 的工具元素并结束这一轮；插件把问题渲染成一条可见的回复（含选项），**你直接回答即可** —— 答案会作为同一会话的下一轮发给 Comate 继续执行（已端到端验证）。但审批类工具（如 `run_command` 的确认）目前不会自动放行，也不会弹出 DSH 的确认卡片。
 - **DuMate 未接入**。DuMate 的积分类接口走 BCE console 签名（加密 cookie），且本机 DuMate 起不来，没有可验证的通路。本仓库不含 DuMate 支持。
 
 ---

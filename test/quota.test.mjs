@@ -98,3 +98,26 @@ test('an unsigned-in account still gets the auto fallback', async () => {
     invalidateComateCaches()
   }
 })
+
+test('the credit multiplier is parsed from the roster string form', async () => {
+  const { parseRatio } = await import('./../lib/quota.js')
+  // The roster publishes `"0.3x"`, not 0.3 — a numeric-only read drops every
+  // multiplier, which silently disables relative spend reporting.
+  assert.equal(parseRatio('0.3x'), 0.3)
+  assert.equal(parseRatio('1x'), 1)
+  assert.equal(parseRatio('0.1x'), 0.1)
+  assert.equal(parseRatio(0.5), 0.5)
+  assert.equal(parseRatio('2'), 2)
+  assert.equal(parseRatio(''), undefined)
+  assert.equal(parseRatio('abc'), undefined)
+  assert.equal(parseRatio(0), undefined)
+  assert.equal(parseRatio(undefined), undefined)
+})
+
+test('a roster entry carries its multiplier through', async () => {
+  stubFetch({ status: 'OK', data: { models: [{ modelId: 'm1', displayName: 'M1', ratio: '0.3x', maxContextWindow: 200 }] } })
+  const { fetchModels, invalidateComateCaches } = await import('./../lib/quota.js')
+  invalidateComateCaches()
+  const models = await fetchModels({ credential: { kind: 'license', value: 'ratio-fetch-1' }, userAgent: 'test' })
+  assert.equal(models[0].ratio, 0.3)
+})

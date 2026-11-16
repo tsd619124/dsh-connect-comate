@@ -29,6 +29,7 @@ import { describeCredential, readCredential, resolveZuluBin } from './lib/paths.
 import { fetchModels, fetchQuota, invalidateComateCaches, userAgentFor } from './lib/quota.js'
 import { saveFieldOutcome, WRITABLE_FIELDS } from './lib/settings.js'
 import { buildUsageTool } from './lib/tool.js'
+import { readUsage } from './lib/usage.js'
 import { ZuluServer } from './lib/zulu.js'
 
 /** Route name the models picker and sessions select. */
@@ -41,7 +42,7 @@ export const SETTINGS_NS = 'dsh-connect-comate'
 const ROUTE_PREFIX = '/plugins/dsh-connect-comate'
 
 /** The plugin's own version, for attribution and for the status card. */
-const VERSION = '0.1.0'
+const VERSION = '0.2.0'
 
 /** The `zulu` CLI generation these endpoints are written against. */
 const ZULU_VERSION = '1.8.1'
@@ -362,6 +363,7 @@ function buildRoutes(options) {
             name: model.name,
             ...(model.description === undefined ? {} : { description: model.description }),
             ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
+            ...(model.ratio === undefined ? {} : { ratio: model.ratio }),
           })),
           enabledModelIds: enabledIds,
           visibleModelIds: visibleModelIds(roster, enabledIds),
@@ -386,7 +388,18 @@ function buildRoutes(options) {
       handler: read(async (req, res) => {
         const credential = readCredential()
         const quota = await fetchQuota({ credential, userAgent: attribution()['user-agent'] })
-        sendJson(res, { credential: describeCredential(credential), quota })
+        // The credit endpoint returns nothing for a public SaaS account, so the
+        // real spend is reported from the CLI's own session store alongside it.
+        const roster = await fetchModels({
+          credential,
+          userAgent: attribution()['user-agent'],
+          zuluVersion: ZULU_VERSION,
+        })
+        sendJson(res, {
+          credential: describeCredential(credential),
+          quota,
+          usage: readUsage({ roster }),
+        })
       }),
     },
     {
