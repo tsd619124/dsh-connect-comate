@@ -346,7 +346,7 @@ description:
 为了让别人能装，包还必须能从 npm 装，或给出可用的 GitHub Release tarball：
 
 ```
-https://github.com/tsd619124/dsh-connect-comate/releases/download/v0.1.0/dsh-connect-comate.tgz
+https://github.com/tsd619124/dsh-connect-comate/releases/latest/download/dsh-connect-comate.tgz
 ```
 
 > 资产名**不要**带版本号。带版本号时 `releases/latest/download/<name>.tgz` 会 404，因为 GitHub 只把不带版本号的名字当作稳定指向；这是 contributing.md 特意警告过的坑。
