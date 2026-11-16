@@ -236,7 +236,7 @@ cd dsh-connect-comate
 node --import ./test/register-loader.mjs --test "test/*.test.mjs"
 ```
 
-116 个测试，全部在无 Host 环境下跑。三处替身：
+118 个测试，全部在无 Host 环境下跑。三处替身：
 
 - `test/loader.mjs` 是 Node loader hook，把 `@deepseek-ai/dsh-llm` 重定向到 `test/fixtures/dsh-llm.js`（镜像真实 base class 的默认方法与 `resolveRetryPolicy` 的形状），把 `@deepseek-ai/schemastery` 指向 profile 里的真实包。
 - `test/fixtures/react.js` 是最小 React（`createElement` / `useState` / `useEffect` / `mount`），让 Settings 页能在 Node 里被真正渲染和断言，不需要浏览器。
@@ -291,7 +291,7 @@ let platform = process.env.PLATFORM || PLATFORM.INTERNAL   // 默认内网
 - **SaaS 账号拿不到「剩余多少积分」这个绝对值**。`/api/openapi/v3/agent/daily_cost` 对真实 license 仍返回 `data: null`（带 `login-name` 头、换 `key` 参数、`user/quota` 端点都试过），积分面板是内网 `fetchUserQuota` + `kernel/quota/planUsageStatus` 专有的。作为替代，插件读 Comate 自己写的会话记录（`~/.comate-engine/store`）给出**真实 token 用量**与**按模型倍率折算的相对消耗**，见下一节。
 - **未做 Comate IDE 的登录态复用**。IDE 把凭据存在 Electron `safeStorage` 里（`state.vscdb` 的 `comate_login_ID` 等），需要 GUI 授权才能解。CLI 登录是干净路径。
 - **图片与附件未接**。`zulu serve` 的 `attachImages` / `attachFiles` 字段存在，但格式未验证，所以没有转发。
-- **需要人工批准时只转述问题，不能代替你点「同意」**。Comate 会发 `awaiting` 的工具元素并结束这一轮；插件把问题渲染成一条可见的回复（含选项），**你直接回答即可** —— 答案会作为同一会话的下一轮发给 Comate 继续执行（已端到端验证）。但审批类工具（如 `run_command` 的确认）目前不会自动放行，也不会弹出 DSH 的确认卡片。
+- **需要人工批准时只转述问题，不能代替你点「同意」**（`requires_action` 帧与本条同样处理）。Comate 会发 `awaiting` 的工具元素并结束这一轮；插件把问题渲染成一条可见的回复（含选项），**你直接回答即可** —— 答案会作为同一会话的下一轮发给 Comate 继续执行（已端到端验证）。但审批类工具（如 `run_command` 的确认）目前不会自动放行，也不会弹出 DSH 的确认卡片；协议里的 `{kind:'requires_action'}` 帧已同样转成可见提问（真机上 `ask_user_question` 那条路先触发，所以这一帧尚未实测到）。
 - **DuMate 未接入**。DuMate 的积分类接口走 BCE console 签名（加密 cookie），且本机 DuMate 起不来，没有可验证的通路。本仓库不含 DuMate 支持。
 
 ---

@@ -207,3 +207,27 @@ test('an executed tool is not mistaken for a pending question', async () => {
   assert.equal(chunks.filter((c) => c.type === 'text-delta').length, 0)
   assert.deepEqual(chunks.at(-1), { type: 'finish', reason: { kind: 'stop' } })
 })
+
+test('a requires_action frame becomes a question the user can answer', async () => {
+  const chunks = await withServer([
+    { kind: 'requires_action', action: { toolName: 'run_command', actionType: 'confirm', resumeToken: 'c1:t1', payload: { title: '需要确认', prompt: '要执行 rm -rf build 吗', options: [{ label: '同意' }, { label: '拒绝' }] } } },
+    { type: 'task_done', status: 'completed', conversationId: 't1' },
+  ], collect)
+  const text = chunks.filter((chunk) => chunk.type === 'text-delta').map((chunk) => chunk.text).join('')
+
+  assert.match(text, /需要确认/)
+  assert.match(text, /要执行 rm -rf build 吗（可选：同意 \/ 拒绝）/)
+  assert.match(text, /直接回答即可/)
+  assert.equal(chunks.filter((chunk) => chunk.type === 'tool-call-delta').length, 0)
+  assert.deepEqual(chunks.at(-1), { type: 'finish', reason: { kind: 'stop' } })
+})
+
+test('a requires_action without a prompt still names the tool', async () => {
+  const chunks = await withServer([
+    { kind: 'requires_action', action: { toolName: 'create_plan', actionType: 'plan' } },
+    { type: 'task_done', status: 'completed', conversationId: 't1' },
+  ], collect)
+  const text = chunks.filter((chunk) => chunk.type === 'text-delta').map((chunk) => chunk.text).join('')
+
+  assert.match(text, /create_plan/)
+})
