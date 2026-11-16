@@ -1,6 +1,6 @@
 # dsh-connect-comate
 
-把本机已登录的 **文心快码（Comate / Zulu）** 接成 DSH 的一个模型 provider，并提供一个只读的积分查询工具。
+把本机已登录的 **文心快码（Comate / Zulu）** 接成 DSH 的一个模型 provider，并提供一个只读的积分 / 用量查询工具。
 
 它不做三件事：不启动自己的登录流程、不写 Comate 的任何文件、不解密 IDE 的凭据库。它用的每一样东西都是你已经在用的。
 
@@ -10,10 +10,11 @@
 
 | 能力 | 落点 | 说明 |
 | --- | --- | --- |
-| 模型 provider `comate` | `llm.registerAdapter` | 每一轮转接给受监管的本地 `zulu serve`，把它的 SSE 帧翻成 DSH 的 `StreamChunk` |
+| 模型 provider `comate` | `llm.registerAdapter` | 每一轮转接给受监管的本地 `zulu serve`，把它的 SSE 帧翻成 DSH 的 `StreamChunk`；一个 DSH 会话复用一个 Comate 会话 |
 | 模型目录 | `llm.listModels` / `resolveModel` | 读 Comate 的账号级模型清单；拿不到时退回 `auto` |
 | 设置页 `Comate` | `settings.section`（order 36） | 在 Settings 里勾选**要用哪几个模型**，没勾的不进模型选择器 |
-| 积分查询工具 | `comate_usage` | 对话里直接问「今天用了多少积分」，只读 |
+| 提问转述 | `lib/turn.js` | Comate 中途中止等用户选择时，把问题渲染成一条可见回复，你答一句它就接着做 |
+| 积分 / 用量查询工具 | `comate_usage` | 对话里问「今天用了多少积分 / tokens」，只读：积分走接口，token 走 Comate 自己的会话记录 |
 | 只读状态接口 | `/plugins/dsh-connect-comate/{status,state,models,usage,refresh}` | 状态、目录与选择、模型、积分、手动清缓存；全部 GET |
 | 唯一写接口 | `POST /plugins/dsh-connect-comate/__save` | 保存模型勾选；走 `settings.mutate` 并回读校验 |
 

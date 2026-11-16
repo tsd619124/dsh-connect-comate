@@ -1,7 +1,7 @@
 {
   "name": "dsh-connect-comate",
   "displayName": "DSH Connect Comate",
-  "description": "把本机已登录的文心快码（Comate / Zulu）接入 DeepSeek Harness：复用 CLI 的登录态，通过受监管的本地 zulu serve 转接对话，并只读展示每日积分与可用模型。",
+  "description": "把本机已登录的文心快码（Comate / Zulu）接成 DSH 的模型 provider，含设置页模型勾选、提问转述与只读用量查询",
   "version": "0.2.1",
   "author": "fengguanjia",
   "license": "MIT",
